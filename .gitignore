@@ -1,0 +1,10 @@
+.DS_Store
+.env
+bin
+*.test
+*.coverprofile
+vendor
+config.yml
+
+# Output binaries
+bin/
