@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy Stock Portfolio API Service on ECS
+
+Parameters:
+  ECRImageURI:
+    Type: String
+    Description: URI for the new ECR Docker image
+  CertificateArn:
+    Type: String
+    Description: The ARN of the SSL/TLS certificate from AWS Certificate Manager
+  ALBArn:
+    Type: String
+    Description: The ARN of the existing Application Load Balancer
+  HTTPListenerArn:
+    Type: String
+    Description: The ARN of the existing HTTP Listener
+  HTTPSListenerArn:
+    Type: String
+    Description: The ARN of the existing HTTPS Listener
+  ECSClusterName:
+    Type: String
+    Description: The name of the existing ECS Cluster
+  PublicSubnetOne:
+    Type: String
+    Description: The ID of the first public subnet
+  PublicSubnetTwo:
+    Type: String
+    Description: The ID of the second public subnet
+  SecurityGroup:
+    Type: String
+    Description: The ID of the security group
+  VpcId:
+    Type: String
+    Description: The ID of the VPC
+  ECSTaskExecutionRoleArn:
+    Type: String
+    Description: The ARN of the ECS Task Execution Role
+
+Resources:
+  StockPortfolioApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: stock-portfolio-api-tg
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: "/"
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: "8080"
+
+  StockPortfolioApiHTTPListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref StockPortfolioApiTargetGroup
+      Conditions:
+        - Field: host-header
+          Values: ["stock-portfolio-api.jrdub.com"]
+      ListenerArn: !Ref HTTPListenerArn
+      Priority: 2  # Ensure unique priority
+
+  StockPortfolioApiHTTPSListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref StockPortfolioApiTargetGroup
+      Conditions:
+        - Field: host-header
+          Values: ["stock-portfolio-api.jrdub.com"]
+      ListenerArn: !Ref HTTPSListenerArn
+      Priority: 2  # Ensure unique priority
+
+  StockPortfolioApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: stock-portfolio-api-td
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !Ref ECSTaskExecutionRoleArn
+      ContainerDefinitions:
+        - Name: stock-portfolio-api-container
+          Image: !Ref ECRImageURI
+          Essential: true
+          Memory: 512
+          Cpu: 256
+          PortMappings:
+            - ContainerPort: 8080
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/stock-portfolio-api
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: ecs
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+
+  StockPortfolioApiECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: stock-portfolio-api-service
+      Cluster: !Ref ECSClusterName
+      TaskDefinition: !Ref StockPortfolioApiTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: stock-portfolio-api-container
+          ContainerPort: 8080
+          TargetGroupArn: !Ref StockPortfolioApiTargetGroup
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PublicSubnetOne
+            - !Ref PublicSubnetTwo
+          SecurityGroups:
+            - !Ref SecurityGroup
+          AssignPublicIp: ENABLED
+
+Outputs:
+  StockPortfolioApiALBDNSName:
+    Description: "The DNS Name of the ALB"
+    Value: !Ref ALBArn

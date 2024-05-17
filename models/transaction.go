@@ -15,7 +15,8 @@ type Transaction struct {
 	Price       float64
 	Fees        float64
 	Amount      float64
-	AccountID   uint     `gorm:"index"`
+	AccountID   uint `gorm:"index"`
+	PositionID  uint
 	Position    Position `gorm:"foreignKey:PositionID"`
 }
 

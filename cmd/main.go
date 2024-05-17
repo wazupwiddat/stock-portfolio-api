@@ -34,6 +34,12 @@ func main() {
 	controller := controllers.InitController(db, cfg)
 	c := cors.AllowAll()
 
+	// Health check endpoint
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET")
+
 	router.HandleFunc("/signup", controller.HandleSignup).Methods("POST")
 	router.HandleFunc("/login", controller.HandleLogin).Methods("POST")
 

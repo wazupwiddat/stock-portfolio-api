@@ -10,7 +10,7 @@ type Position struct {
 	Quantity         float64       `gorm:"not null"`
 	CostBasis        float64       `gorm:"not null"`
 	Opened           bool          `gorm:"not null"`
-	Transactions     []Transaction `gorm:"many2many:position_transactions;"`
+	Transactions     []Transaction `gorm:"foreignKey:PositionID"`
 }
 
 // FetchAllPositions fetches all positions for a given stock symbol
