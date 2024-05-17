@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"github.com/rs/cors"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func main() {
@@ -20,6 +23,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 		return
+	}
+	// create schema if does not exist
+	// Connect to MySQL server without specifying a database
+	rootDSN := fmt.Sprintf("%s:%s@tcp(%s:%s)/", cfg.MySQL.User, cfg.MySQL.Password, cfg.MySQL.Server, cfg.MySQL.Port)
+	rootDB, err := sql.Open("mysql", rootDSN)
+	if err != nil {
+		log.Fatalf("failed to connect to MySQL server: %v", err)
+	}
+	defer rootDB.Close()
+
+	// Create the database if it doesn't exist
+	_, err = rootDB.Exec("CREATE DATABASE IF NOT EXISTS " + cfg.MySQL.Schema)
+	if err != nil {
+		log.Fatalf("failed to create database: %v", err)
 	}
 	// connect to the database
 	dsn := cfg.MySQLDNS()
