@@ -18,7 +18,7 @@ type CreateTransactionRequest struct {
 	Description string `json:"Description" binding:"required"`
 	Quantity    string `json:"Quantity" binding:"required"`
 	Price       string `json:"Price" binding:"required"`
-	FeesComm    string `json:"Fees & Comm" binding:"required"`
+	FeesComm    string `json:"FeesComm" binding:"required"`
 	Amount      string `json:"Amount" binding:"required"`
 	AccountID   uint   `json:"AccountID" binding:"required"`
 }
@@ -82,12 +82,16 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		quantity = -quantity
 	}
 
-	// Extract stock symbol (e.g., "DDOG")
+	// Extract stock symbol (e.g., "DDOG" or "DDOG 04/19/2024 125.00 C")
 	parts := strings.Split(req.Symbol, " ")
-	if len(parts) < 4 {
+
+	// Handle the error condition first
+	if len(parts) < 1 {
 		http.Error(w, "Invalid Symbol", http.StatusBadRequest)
 		return
 	}
+
+	// If valid, extract the stock symbol
 	stockSymbol := parts[0]
 
 	var position models.Position
@@ -116,13 +120,16 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 
 	// Create the new transaction
 	transaction := &models.Transaction{
-		Position:  position,
-		Action:    req.Action,
-		Quantity:  quantity,
-		Price:     price,
-		Fees:      fees,
-		Amount:    amount,
-		AccountID: acct.ID,
+		Date:        req.Date,
+		Symbol:      req.Symbol,
+		Description: req.Description,
+		Position:    position,
+		Action:      req.Action,
+		Quantity:    quantity,
+		Price:       price,
+		Fees:        fees,
+		Amount:      amount,
+		AccountID:   acct.ID,
 	}
 	if err := c.db.Create(transaction).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

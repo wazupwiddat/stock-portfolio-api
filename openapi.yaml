@@ -1,0 +1,259 @@
+openapi: 3.0.1
+info:
+  title: Stock Portfolio API
+  description: API for managing a stock portfolio
+  version: 1.0.0
+servers:
+  - url: https://stock-portfolio-api.jrdub.com
+paths:
+  /:
+    get:
+      summary: Health Check
+      responses:
+        '200':
+          description: OK
+  /signup:
+    post:
+      summary: Sign up a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: User created successfully
+        '400':
+          description: Invalid input
+  /login:
+    post:
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Unauthorized
+  /protected/accounts:
+    post:
+      summary: Create a new account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '200':
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401':
+          description: Unauthorized
+    get:
+      summary: Get all accounts
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+        '401':
+          description: Unauthorized
+  /protected/transactions:
+    post:
+      summary: Create a new transaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransactionRequest'
+      responses:
+        '200':
+          description: Transaction created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '401':
+          description: Unauthorized
+    get:
+      summary: Get all transactions
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Transaction'
+        '401':
+          description: Unauthorized
+  /protected/positions:
+    get:
+      summary: Get all positions
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Position'
+        '401':
+          description: Unauthorized
+components:
+  schemas:
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        name:
+          type: string
+    Position:
+      type: object
+      properties:
+        id:
+          type: integer
+        symbol:
+          type: string
+        underlying_symbol:
+          type: string
+        quantity:
+          type: number
+        cost_basis:
+          type: number
+        opened:
+          type: boolean
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+        action:
+          type: string
+        symbol:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: number
+        price:
+          type: number
+        fees:
+          type: number
+        amount:
+          type: number
+        account_id:
+          type: integer
+        position_id:
+          type: integer
+        position:
+          $ref: '#/components/schemas/Position'
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        password_hash:
+          type: string
+    CreateTransactionRequest:
+      type: object
+      properties:
+        date:
+          type: string
+          example: "2024-01-01"
+        action:
+          type: string
+          example: "BUY"
+        symbol:
+          type: string
+          example: "AAPL"
+        description:
+          type: string
+          example: "Apple Inc."
+        quantity:
+          type: string
+          example: "10"
+        price:
+          type: string
+          example: "150.00"
+        fees_comm:
+          type: string
+          example: "1.50"
+        amount:
+          type: string
+          example: "1500.00"
+        account_id:
+          type: integer
+          example: 1
+      required:
+        - date
+        - action
+        - symbol
+        - description
+        - quantity
+        - price
+        - fees_comm
+        - amount
+        - account_id
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          example: "user@example.com"
+        password:
+          type: string
+          example: "password123"
+      required:
+        - email
+        - password
+    CreateAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "My Investment Account"
+      required:
+        - name
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
