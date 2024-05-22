@@ -110,20 +110,38 @@ paths:
                   $ref: '#/components/schemas/Transaction'
         '401':
           description: Unauthorized
-  /protected/positions:
-    get:
-      summary: Get all positions
+  /protected/transactions/import:
+    post:
+      summary: Import transactions from a JSON file
       security:
         - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                account_id:
+                  type: integer
+                  example: 1
+                file:
+                  type: string
+                  format: binary
       responses:
         '200':
-          description: List of positions
+          description: Import initiated successfully
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Position'
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid input
         '401':
           description: Unauthorized
 components:

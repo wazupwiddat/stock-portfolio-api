@@ -4,12 +4,13 @@ import "gorm.io/gorm"
 
 type Position struct {
 	gorm.Model
-	ID               uint          `gorm:"primaryKey"`
-	Symbol           string        `gorm:"not null"`
-	UnderlyingSymbol string        `gorm:"not null"`
-	Quantity         float64       `gorm:"not null"`
-	CostBasis        float64       `gorm:"not null"`
-	Opened           bool          `gorm:"not null"`
+	ID               uint    `gorm:"primaryKey"`
+	Symbol           string  `gorm:"not null"`
+	UnderlyingSymbol string  `gorm:"not null"`
+	Quantity         float64 `gorm:"not null"`
+	CostBasis        float64 `gorm:"not null"`
+	Opened           bool    `gorm:"not null"`
+	GainLoss         float64
 	Transactions     []Transaction `gorm:"foreignKey:PositionID"`
 }
 

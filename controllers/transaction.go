@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"gorm.io/gorm"
-
 	"stock-portfolio-api/models"
 )
 
@@ -45,7 +43,7 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 
 	acct, err := models.FindAccountByID(c.db, req.AccountID)
 	if err != nil || acct.UserID != u.ID {
-		http.Error(w, "Unable to find acct", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized or account not found", http.StatusUnauthorized)
 		return
 	}
 
@@ -77,53 +75,11 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Determine if the action is a buy or sell and adjust quantity accordingly
-	if strings.Contains(strings.ToLower(req.Action), "sell") {
-		quantity = -quantity
-	}
-
-	// Extract stock symbol (e.g., "DDOG" or "DDOG 04/19/2024 125.00 C")
-	parts := strings.Split(req.Symbol, " ")
-
-	// Handle the error condition first
-	if len(parts) < 1 {
-		http.Error(w, "Invalid Symbol", http.StatusBadRequest)
-		return
-	}
-
-	// If valid, extract the stock symbol
-	stockSymbol := parts[0]
-
-	var position models.Position
-	// Find an open position for the given stock symbol
-	err = c.db.Where("symbol = ? AND opened = ?", req.Symbol, true).First(&position).Error
-
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			// No open position found, create a new position
-			position = models.Position{
-				Symbol:           req.Symbol,
-				UnderlyingSymbol: stockSymbol,
-				Quantity:         0,
-				CostBasis:        0,
-				Opened:           true,
-			}
-			if err := c.db.Create(&position).Error; err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		} else {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
 	// Create the new transaction
 	transaction := &models.Transaction{
 		Date:        req.Date,
 		Symbol:      req.Symbol,
 		Description: req.Description,
-		Position:    position,
 		Action:      req.Action,
 		Quantity:    quantity,
 		Price:       price,
@@ -131,7 +87,7 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		Amount:      amount,
 		AccountID:   acct.ID,
 	}
-	if err := c.db.Create(transaction).Error; err != nil {
+	if _, err := models.Create(c.db, transaction); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -169,6 +125,15 @@ func (c *Controller) HandleGetTransactions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	total, err := models.CountTransactionsByAccountIDAndSymbol(c.db, uint(accountID), symbol)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(transactions)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"transactions": transactions,
+		"total":        total,
+	})
 }

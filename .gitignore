@@ -9,6 +9,7 @@ config*.yml
 # Output binaries
 bin/
 main
+uploads
 
 # IDE and editor files
 .idea/
