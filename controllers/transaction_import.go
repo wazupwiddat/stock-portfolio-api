@@ -154,6 +154,9 @@ func importFile(filePath string, db *gorm.DB, accountID uint) {
 		"Sell to Close": true,
 		"Buy":           true,
 		"Sell":          true,
+		"Assigned":      true,
+		"Expired":       true,
+		"Sell Short":    true,
 	}
 
 	var transactions []models.Transaction

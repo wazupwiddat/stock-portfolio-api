@@ -37,9 +37,15 @@ func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
 	// Check if there's an existing open position with the same symbol
 	if err := tx.Where("symbol = ? AND opened = ?", t.Symbol, true).First(&position).Error; err == gorm.ErrRecordNotFound {
 		// If no open position exists, create a new one
+
+		underlyingSymbol := t.Symbol
+		parts := strings.Split(t.Symbol, " ")
+		if len(parts) > 1 {
+			underlyingSymbol = parts[0]
+		}
 		position = Position{
 			Symbol:           t.Symbol,
-			UnderlyingSymbol: t.Symbol, // Assuming UnderlyingSymbol is the same as Symbol here
+			UnderlyingSymbol: underlyingSymbol, // Assuming UnderlyingSymbol is the same as Symbol here
 			Quantity:         t.Quantity,
 			CostBasis:        t.Price * t.Quantity,
 			Opened:           t.Quantity != 0,
