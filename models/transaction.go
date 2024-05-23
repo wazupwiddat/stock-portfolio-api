@@ -1,18 +1,20 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
 
 type Transaction struct {
 	gorm.Model
-	ID          uint   `gorm:"primaryKey"`
-	Date        string `gorm:"size:50"`
-	Action      string `gorm:"size:50"`
-	Symbol      string `gorm:"size:50"`
-	Description string `gorm:"size:250"`
+	ID          uint      `gorm:"primaryKey"`
+	Date        time.Time `gorm:"type:date"`
+	Action      string    `gorm:"size:50"`
+	Symbol      string    `gorm:"size:50"`
+	Description string    `gorm:"size:250"`
 	Quantity    float64
 	Price       float64
 	Fees        float64
@@ -20,6 +22,18 @@ type Transaction struct {
 	AccountID   uint `gorm:"index"`
 	PositionID  uint
 	Position    Position `gorm:"foreignKey:PositionID"`
+}
+
+// MarshalJSON customizes the JSON representation of the Transaction struct
+func (t Transaction) MarshalJSON() ([]byte, error) {
+	type Alias Transaction
+	return json.Marshal(&struct {
+		Alias
+		Date string `json:"Date"`
+	}{
+		Alias: (Alias)(t),
+		Date:  t.Date.Format("01/02/2006"),
+	})
 }
 
 // BeforeCreate hook to adjust transaction values and ensure the position exists before creating the transaction
@@ -132,7 +146,7 @@ func CreateMany(db *gorm.DB, trans []Transaction) error {
 
 func FindAllByAccount(db *gorm.DB, a *Account) ([]Transaction, error) {
 	var transactions []Transaction
-	res := db.Find(&transactions, &Transaction{AccountID: a.ID})
+	res := db.Where("account_id = ?", a.ID).Order("date DESC").Find(&transactions)
 	if res.Error != nil {
 		return nil, res.Error
 	}
@@ -148,7 +162,7 @@ func FetchTransactionsByAccountIDAndSymbol(db *gorm.DB, accountID uint, symbol s
 	}
 
 	offset := (page - 1) * limit
-	if err := query.Offset(offset).Limit(limit).Find(&transactions).Error; err != nil {
+	if err := query.Order("date DESC").Offset(offset).Limit(limit).Find(&transactions).Error; err != nil {
 		return nil, err
 	}
 
@@ -164,4 +178,18 @@ func CountTransactionsByAccountIDAndSymbol(db *gorm.DB, accountID uint, symbol s
 	}
 	err := query.Count(&count).Error
 	return count, err
+}
+
+// GetLastTransactionDate returns the date of the last transaction for the given account
+func GetLastTransactionDate(db *gorm.DB, accountID uint) (time.Time, error) {
+	var lastTransaction Transaction
+	err := db.Where("account_id = ?", accountID).Order("date DESC").First(&lastTransaction).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// If no transactions are found, return a zero time
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	return lastTransaction.Date, nil
 }

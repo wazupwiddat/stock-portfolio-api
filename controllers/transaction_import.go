@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"stock-portfolio-api/models"
 
@@ -108,14 +109,25 @@ func importUploadedJSONFiles(db *gorm.DB, accountID uint) {
 		return
 	}
 
+	// Get the last imported transaction date for the account
+	lastTransactionDate, err := models.GetLastTransactionDate(db, accountID)
+	if err != nil {
+		log.Println("Error retrieving last transaction date:", err)
+		return
+	}
+
 	for _, file := range files {
 		if file.Type().IsRegular() && filepath.Ext(file.Name()) == ".json" {
-			importFile(filepath.Join("./uploads", file.Name()), db, accountID)
+			filename := filepath.Join("./uploads", file.Name())
+			importFile(filename, db, accountID, lastTransactionDate)
+			if e := os.Remove(filename); e != nil {
+				log.Println(err)
+			}
 		}
 	}
 }
 
-func importFile(filePath string, db *gorm.DB, accountID uint) {
+func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDate time.Time) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		log.Println("Error opening file:", err)
@@ -156,12 +168,28 @@ func importFile(filePath string, db *gorm.DB, accountID uint) {
 		"Sell":          true,
 		"Assigned":      true,
 		"Expired":       true,
-		"Sell Short":    true,
 	}
 
 	var transactions []models.Transaction
 	for _, bt := range transactionsFile.BrokerageTransactions {
 		if !allowedActions[bt.Action] {
+			continue
+		}
+
+		// Extract the correct date from the Date field
+		transactionDateStr := extractCorrectDate(bt.Date)
+		transactionDate, err := time.Parse("01/02/2006", transactionDateStr)
+		if err != nil {
+			log.Println("Error parsing transaction date:", err)
+			continue
+		}
+
+		// Convert to local time zone at the beginning of the day
+		location, _ := time.LoadLocation("Local")
+		transactionDate = time.Date(transactionDate.Year(), transactionDate.Month(), transactionDate.Day(), 0, 0, 0, 0, location)
+
+		// Skip transactions that are older than or equal to the last transaction date
+		if transactionDate.Before(lastTransactionDate) || transactionDate.Equal(lastTransactionDate) {
 			continue
 		}
 
@@ -172,7 +200,7 @@ func importFile(filePath string, db *gorm.DB, accountID uint) {
 
 		// Create a new transaction
 		transaction := models.Transaction{
-			Date:        bt.Date,
+			Date:        transactionDate,
 			Action:      bt.Action,
 			Symbol:      bt.Symbol,
 			Description: bt.Description,
@@ -185,9 +213,22 @@ func importFile(filePath string, db *gorm.DB, accountID uint) {
 		transactions = append(transactions, transaction)
 	}
 
+	if len(transactions) == 0 {
+		log.Println("Nothing to import")
+		return
+	}
+
 	if err := models.CreateMany(db, transactions); err != nil {
 		log.Println("Error inserting transactions into the database:", err)
 	}
+}
+
+// Helper function to extract the correct date from the date string
+func extractCorrectDate(dateStr string) string {
+	// Split the date string by " as of "
+	parts := strings.Split(dateStr, " as of ")
+	// Return the last part
+	return parts[len(parts)-1]
 }
 
 // Helper function to parse monetary values by removing $ and ,

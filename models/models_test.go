@@ -2,6 +2,7 @@ package models
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/smartystreets/goconvey/convey"
 	"gorm.io/driver/sqlite"
@@ -22,8 +23,10 @@ func TestTransactionModel(t *testing.T) {
 		db, err := setupDB()
 		So(err, ShouldBeNil)
 
+		date, _ := time.Parse("2006-01-02", "2023-05-22")
+
 		transaction := Transaction{
-			Date:        "2023-05-22",
+			Date:        date,
 			Action:      "BUY",
 			Symbol:      "AAPL",
 			Description: "Apple stock",
@@ -105,8 +108,10 @@ func TestPositionModel(t *testing.T) {
 		So(err, ShouldBeNil)
 
 		Convey("When creating a new transaction with no open positions for the symbol", func() {
+			date, _ := time.Parse("2006-01-02", "2023-05-22")
+
 			transaction := Transaction{
-				Date:        "2023-05-22",
+				Date:        date,
 				Action:      "BUY",
 				Symbol:      "AAPL",
 				Description: "Apple stock",
@@ -131,8 +136,10 @@ func TestPositionModel(t *testing.T) {
 				So(position.GainLoss, ShouldEqual, 0) // Initially, GainLoss should be 0
 
 				Convey("When adding a new transaction that sums the quantity to 0", func() {
+					date2, _ := time.Parse("2006-01-02", "2023-05-23")
+
 					newTransaction := Transaction{
-						Date:        "2023-05-23",
+						Date:        date2,
 						Action:      "SELL",
 						Symbol:      "AAPL",
 						Description: "Apple stock",
@@ -174,9 +181,13 @@ func TestCreateManyTransactions(t *testing.T) {
 		So(err, ShouldBeNil)
 
 		Convey("When creating multiple transactions", func() {
+			date1, _ := time.Parse("2006-01-02", "2023-05-22")
+			date2, _ := time.Parse("2006-01-02", "2023-05-23")
+			date3, _ := time.Parse("2006-01-02", "2023-05-24")
+
 			transactions := []Transaction{
 				{
-					Date:        "2023-05-22",
+					Date:        date1,
 					Action:      "BUY",
 					Symbol:      "GOOG",
 					Description: "Google stock",
@@ -187,7 +198,7 @@ func TestCreateManyTransactions(t *testing.T) {
 					AccountID:   1,
 				},
 				{
-					Date:        "2023-05-23",
+					Date:        date2,
 					Action:      "BUY",
 					Symbol:      "GOOG",
 					Description: "Google stock",
@@ -198,11 +209,11 @@ func TestCreateManyTransactions(t *testing.T) {
 					AccountID:   1,
 				},
 				{
-					Date:        "2023-05-24",
+					Date:        date3,
 					Action:      "SELL",
 					Symbol:      "GOOG",
 					Description: "Google stock",
-					Quantity:    10,
+					Quantity:    -10,
 					Price:       220.00,
 					Fees:        1.00,
 					Amount:      2200.00,

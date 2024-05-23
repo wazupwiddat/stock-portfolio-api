@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"stock-portfolio-api/models"
 )
@@ -47,6 +48,13 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parse Date
+	transactionDate, err := time.Parse("2006-01-02", req.Date)
+	if err != nil {
+		http.Error(w, "Invalid Date", http.StatusBadRequest)
+		return
+	}
+
 	// Parse Quantity
 	quantity, err := parseMonetaryValue(req.Quantity)
 	if err != nil {
@@ -77,7 +85,7 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 
 	// Create the new transaction
 	transaction := &models.Transaction{
-		Date:        req.Date,
+		Date:        transactionDate,
 		Symbol:      req.Symbol,
 		Description: req.Description,
 		Action:      req.Action,
