@@ -4,9 +4,13 @@ import "gorm.io/gorm"
 
 type Account struct {
 	gorm.Model
-	ID     uint   `gorm:"primaryKey"`
-	UserID uint   `gorm:"index"`
-	Name   string `gorm:"size:100;unique;not null"`
+	ID           uint   `gorm:"primaryKey"`
+	UserID       uint   `gorm:"index"`
+	User         User   `gorm:"foreignKey:UserID"`
+	Name         string `gorm:"size:100"`
+	Balance      float64
+	Positions    []Position    `gorm:"foreignKey:AccountID"`
+	Transactions []Transaction `gorm:"foreignKey:AccountID"`
 }
 
 // CreateAccount creates a new account in the database

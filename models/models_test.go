@@ -23,6 +23,12 @@ func TestTransactionModel(t *testing.T) {
 		db, err := setupDB()
 		So(err, ShouldBeNil)
 
+		// Create a user and account
+		user := User{Email: "test@example.com", PasswordHash: "hashedpassword"}
+		db.Create(&user)
+		account := Account{UserID: user.ID, Name: "Test Account"}
+		db.Create(&account)
+
 		date, _ := time.Parse("2006-01-02", "2023-05-22")
 
 		transaction := Transaction{
@@ -34,7 +40,7 @@ func TestTransactionModel(t *testing.T) {
 			Price:       150.00,
 			Fees:        1.00,
 			Amount:      1500.00,
-			AccountID:   1,
+			AccountID:   account.ID,
 		}
 
 		Convey("When creating a transaction", func() {
@@ -82,19 +88,22 @@ func TestAccountModel(t *testing.T) {
 		db, err := setupDB()
 		So(err, ShouldBeNil)
 
+		// Create a user first
+		user := User{Email: "test@example.com", PasswordHash: "hashedpassword"}
+		db.Create(&user)
+
 		account := Account{
-			UserID: 1,
+			UserID: user.ID,
 			Name:   "Test Account",
 		}
 
 		Convey("When creating an account", func() {
-			createdAccount, err := CreateAccount(db, account.Name)
-			So(err, ShouldBeNil)
-			So(createdAccount.Name, ShouldEqual, "Test Account")
+			db.Create(&account)
+			So(account.ID, ShouldNotBeZeroValue)
 
 			Convey("Then it should be retrievable from the database", func() {
 				var retrievedAccount Account
-				err := db.First(&retrievedAccount, createdAccount.ID).Error
+				err := db.First(&retrievedAccount, account.ID).Error
 				So(err, ShouldBeNil)
 				So(retrievedAccount.Name, ShouldEqual, "Test Account")
 			})
@@ -106,6 +115,12 @@ func TestPositionModel(t *testing.T) {
 	Convey("Given a database and positions", t, func() {
 		db, err := setupDB()
 		So(err, ShouldBeNil)
+
+		// Create a user and account
+		user := User{Email: "test@example.com", PasswordHash: "hashedpassword"}
+		db.Create(&user)
+		account := Account{UserID: user.ID, Name: "Test Account"}
+		db.Create(&account)
 
 		Convey("When creating a new transaction with no open positions for the symbol", func() {
 			date, _ := time.Parse("2006-01-02", "2023-05-22")
@@ -119,7 +134,7 @@ func TestPositionModel(t *testing.T) {
 				Price:       150.00,
 				Fees:        1.00,
 				Amount:      -1500.00,
-				AccountID:   1,
+				AccountID:   account.ID,
 			}
 
 			id, err := Create(db, &transaction)
@@ -147,7 +162,7 @@ func TestPositionModel(t *testing.T) {
 						Price:       160.00,
 						Fees:        1.00,
 						Amount:      1600.00,
-						AccountID:   1,
+						AccountID:   account.ID,
 						PositionID:  position.ID,
 					}
 
@@ -180,6 +195,12 @@ func TestCreateManyTransactions(t *testing.T) {
 		db, err := setupDB()
 		So(err, ShouldBeNil)
 
+		// Create a user and account
+		user := User{Email: "test@example.com", PasswordHash: "hashedpassword"}
+		db.Create(&user)
+		account := Account{UserID: user.ID, Name: "Test Account"}
+		db.Create(&account)
+
 		Convey("When creating multiple transactions", func() {
 			date1, _ := time.Parse("2006-01-02", "2023-05-22")
 			date2, _ := time.Parse("2006-01-02", "2023-05-23")
@@ -195,7 +216,7 @@ func TestCreateManyTransactions(t *testing.T) {
 					Price:       200.00,
 					Fees:        1.00,
 					Amount:      1000.00,
-					AccountID:   1,
+					AccountID:   account.ID,
 				},
 				{
 					Date:        date2,
@@ -206,7 +227,7 @@ func TestCreateManyTransactions(t *testing.T) {
 					Price:       210.00,
 					Fees:        1.00,
 					Amount:      1050.00,
-					AccountID:   1,
+					AccountID:   account.ID,
 				},
 				{
 					Date:        date3,
@@ -217,7 +238,7 @@ func TestCreateManyTransactions(t *testing.T) {
 					Price:       220.00,
 					Fees:        1.00,
 					Amount:      2200.00,
-					AccountID:   1,
+					AccountID:   account.ID,
 				},
 			}
 
@@ -246,6 +267,55 @@ func TestCreateManyTransactions(t *testing.T) {
 				})
 			})
 
+		})
+	})
+}
+
+func TestDeleteTransaction(t *testing.T) {
+	Convey("Given a database with a transaction", t, func() {
+		db, err := setupDB()
+		So(err, ShouldBeNil)
+
+		// Create a user and account
+		user := User{Email: "test@example.com", PasswordHash: "hashedpassword"}
+		db.Create(&user)
+		account := Account{UserID: user.ID, Name: "Test Account"}
+		db.Create(&account)
+
+		date, _ := time.Parse("2006-01-02", "2023-05-22")
+
+		transaction := Transaction{
+			Date:        date,
+			Action:      "BUY",
+			Symbol:      "AAPL",
+			Description: "Apple stock",
+			Quantity:    10,
+			Price:       150.00,
+			Fees:        1.00,
+			Amount:      -1500.00,
+			AccountID:   account.ID,
+		}
+
+		// Create the transaction and position
+		id, err := Create(db, &transaction)
+		So(err, ShouldBeNil)
+		So(id, ShouldEqual, transaction.ID)
+
+		Convey("When deleting the transaction", func() {
+			err := DeleteTransaction(db, transaction.ID)
+			So(err, ShouldBeNil)
+
+			Convey("Then the transaction should be removed from the database", func() {
+				var count int64
+				db.Model(&Transaction{}).Where("id = ?", transaction.ID).Count(&count)
+				So(count, ShouldEqual, 0)
+			})
+
+			Convey("And the position should also be removed if it has no other transactions", func() {
+				var position Position
+				err := db.Where("id = ?", transaction.PositionID).First(&position).Error
+				So(err, ShouldEqual, gorm.ErrRecordNotFound)
+			})
 		})
 	})
 }

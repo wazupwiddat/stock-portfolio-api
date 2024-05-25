@@ -2,12 +2,15 @@ package controllers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"stock-portfolio-api/models"
+
+	"github.com/gorilla/mux"
 )
 
 type CreateTransactionRequest struct {
@@ -30,6 +33,7 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	log.Println(req)
 	// Helper function to parse monetary values by removing $ and ,
 	parseMonetaryValue := func(value string) (float64, error) {
 		cleanedValue := strings.ReplaceAll(strings.ReplaceAll(value, "$", ""), ",", "")
@@ -144,4 +148,33 @@ func (c *Controller) HandleGetTransactions(w http.ResponseWriter, r *http.Reques
 		"transactions": transactions,
 		"total":        total,
 	})
+}
+
+// HandleDeleteTransaction handles the deletion of a transaction by ID
+func (c *Controller) HandleDeleteTransaction(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid transaction ID", http.StatusBadRequest)
+		return
+	}
+
+	u, err := userFromRequestContext(r, c.db)
+	if err != nil {
+		http.Error(w, "Unable to find user", http.StatusUnauthorized)
+		return
+	}
+
+	transaction, err := models.FindTransactionByID(c.db, uint(id))
+	if err != nil || transaction == nil || transaction.Account.UserID != u.ID {
+		http.Error(w, "Transaction not found or unauthorized", http.StatusNotFound)
+		return
+	}
+
+	if err := models.DeleteTransaction(c.db, uint(id)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

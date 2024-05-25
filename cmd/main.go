@@ -65,11 +65,11 @@ func main() {
 	protected.HandleFunc("/accounts", controller.HandleGetAccounts).Methods("GET")
 	protected.HandleFunc("/transactions", controller.HandleCreateTransaction).Methods("POST")
 	protected.HandleFunc("/transactions", controller.HandleGetTransactions).Methods("GET")
+	protected.HandleFunc("/transactions/{id}", controller.HandleDeleteTransaction).Methods("DELETE")
 	protected.HandleFunc("/transactions/import", controller.HandleImport).Methods("POST") // Add this line for the import endpoint
 	protected.HandleFunc("/positions", controller.HandleGetPositions).Methods("GET")
 
 	protected.Use(controller.VerifyJWT)
 
 	http.ListenAndServe(fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port), c.Handler(router))
-
 }

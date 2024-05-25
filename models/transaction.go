@@ -19,7 +19,8 @@ type Transaction struct {
 	Price       float64
 	Fees        float64
 	Amount      float64
-	AccountID   uint `gorm:"index"`
+	AccountID   uint    `gorm:"index"`
+	Account     Account `gorm:"foreignKey:AccountID"`
 	PositionID  uint
 	Position    Position `gorm:"foreignKey:PositionID"`
 }
@@ -63,6 +64,7 @@ func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
 			Quantity:         t.Quantity,
 			CostBasis:        t.Price * t.Quantity,
 			Opened:           t.Quantity != 0,
+			AccountID:        t.AccountID, // Ensure AccountID is set
 		}
 		if err := tx.Create(&position).Error; err != nil {
 			return err
@@ -120,6 +122,41 @@ func (t *Transaction) AfterSave(tx *gorm.DB) error {
 	position.GainLoss = gainLoss
 
 	return tx.Save(&position).Error
+}
+
+// FindTransactionByID fetches a transaction by ID and includes the associated account information
+func FindTransactionByID(db *gorm.DB, id uint) (*Transaction, error) {
+	var transaction Transaction
+	result := db.Preload("Account").First(&transaction, id)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &transaction, nil
+}
+
+// DeleteTransaction deletes a transaction by ID and removes the associated position if no other transactions exist
+func DeleteTransaction(db *gorm.DB, id uint) error {
+	var transaction Transaction
+	if err := db.First(&transaction, id).Error; err != nil {
+		return err
+	}
+
+	// Delete the transaction
+	if err := db.Delete(&Transaction{}, id).Error; err != nil {
+		return err
+	}
+
+	// Check if the position has any other transactions
+	var count int64
+	db.Model(&Transaction{}).Where("position_id = ?", transaction.PositionID).Count(&count)
+	if count == 0 {
+		// No more transactions for this position, delete the position
+		if err := db.Delete(&Position{}, transaction.PositionID).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // CalculateTotalCost calculates the total cost of transactions associated with the position

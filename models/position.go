@@ -11,6 +11,7 @@ type Position struct {
 	CostBasis        float64 `gorm:"not null"`
 	Opened           bool    `gorm:"not null"`
 	GainLoss         float64
+	AccountID        uint          `gorm:"index"`
 	Transactions     []Transaction `gorm:"foreignKey:PositionID"`
 }
 
