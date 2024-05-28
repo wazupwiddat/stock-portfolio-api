@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,7 +32,6 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	log.Println(req)
 	// Helper function to parse monetary values by removing $ and ,
 	parseMonetaryValue := func(value string) (float64, error) {
 		cleanedValue := strings.ReplaceAll(strings.ReplaceAll(value, "$", ""), ",", "")

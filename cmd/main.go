@@ -13,6 +13,7 @@ import (
 	"github.com/rs/cors"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -40,7 +41,9 @@ func main() {
 	}
 	// connect to the database
 	dsn := cfg.MySQLDNS()
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

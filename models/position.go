@@ -50,6 +50,16 @@ func (p *Position) CalculateNetQuantity(db *gorm.DB) (float64, error) {
 	return totalQuantity, nil
 }
 
+// CalculateNetAmount calculates the net quantity of transactions associated with the position
+func (p *Position) CalculateNetAmount(db *gorm.DB) (float64, error) {
+	var totalAmount float64
+	result := db.Model(&Transaction{}).Where("position_id = ?", p.ID).Select("SUM(amount)").Scan(&totalAmount)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return totalAmount, nil
+}
+
 // IsOpen checks if the position is open based on the net quantity of transactions
 func (p *Position) IsOpen(db *gorm.DB) (bool, error) {
 	netQuantity, err := p.CalculateNetQuantity(db)

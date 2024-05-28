@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -47,10 +48,15 @@ func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
 		t.Quantity = -t.Quantity
 	}
 
+	// Handle Stock Split, price needs to be 0 in order to calculate CostBasis on the position correctly
+	if t.Action == "Stock Split" {
+		t.Price = 0
+	}
+
 	var position Position
 
-	// Check if there's an existing open position with the same symbol
-	if err := tx.Where("symbol = ? AND opened = ?", t.Symbol, true).First(&position).Error; err == gorm.ErrRecordNotFound {
+	// Check if there's an existing open position with the same symbol and account
+	if err := tx.Where("symbol = ? AND opened = ? AND account_id = ?", t.Symbol, true, t.AccountID).First(&position).Error; err == gorm.ErrRecordNotFound {
 		// If no open position exists, create a new one
 
 		underlyingSymbol := t.Symbol
@@ -89,6 +95,42 @@ func (t *Transaction) AfterSave(tx *gorm.DB) error {
 	// Load the existing position
 	if err := tx.First(&position, t.PositionID).Error; err != nil {
 		return err
+	}
+
+	// Handle Options Forward Split
+	if t.Action == "Options Frwd Split" {
+		newSymbolParts := strings.Split(t.Symbol, " ")
+		if len(newSymbolParts) < 4 {
+			return fmt.Errorf("invalid option symbol format: %s", t.Symbol)
+		}
+
+		underlyingSymbol := newSymbolParts[0]
+		expirationDate := newSymbolParts[1]
+		optionType := newSymbolParts[3]
+
+		// Find the old position using LIKE
+		var oldPosition Position
+		if err := tx.Where("symbol LIKE ? AND account_id = ? AND opened = ?", fmt.Sprintf("%s %s %% %s", underlyingSymbol, expirationDate, optionType), t.AccountID, true).First(&oldPosition).Error; err != nil {
+			return err
+		}
+
+		// Move all transactions from the old position to the new position and update their symbols
+		var transactions []Transaction
+		if err := tx.Model(&Transaction{}).Where("position_id = ?", oldPosition.ID).Find(&transactions).Error; err != nil {
+			return err
+		}
+		for _, transaction := range transactions {
+			transaction.PositionID = t.PositionID
+			transaction.Symbol = t.Symbol
+			if err := tx.Save(&transaction).Error; err != nil {
+				return err
+			}
+		}
+
+		// Delete the old position
+		if err := tx.Delete(&oldPosition).Error; err != nil {
+			return err
+		}
 	}
 
 	// Update the existing position

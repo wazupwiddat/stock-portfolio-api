@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -160,14 +161,17 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 
 	// Define the allowed actions
 	allowedActions := map[string]bool{
-		"Buy to Open":   true,
-		"Buy to Close":  true,
-		"Sell to Open":  true,
-		"Sell to Close": true,
-		"Buy":           true,
-		"Sell":          true,
-		"Assigned":      true,
-		"Expired":       true,
+		"Buy to Open":          true,
+		"Buy to Close":         true,
+		"Sell to Open":         true,
+		"Sell to Close":        true,
+		"Buy":                  true,
+		"Sell":                 true,
+		"Assigned":             true,
+		"Expired":              true,
+		"Options Frwd Split":   true,
+		"Stock Split":          true,
+		"Exchange or Exercise": true,
 	}
 
 	var transactions []models.Transaction
@@ -218,8 +222,16 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 		return
 	}
 
-	if err := models.CreateMany(db, transactions); err != nil {
-		log.Println("Error inserting transactions into the database:", err)
+	// Sort transactions by date (oldest to newest)
+	sort.Slice(transactions, func(i, j int) bool {
+		return transactions[i].Date.Before(transactions[j].Date)
+	})
+
+	// Insert transactions into the database
+	for _, transaction := range transactions {
+		if _, err := models.Create(db, &transaction); err != nil {
+			log.Println("Error inserting transaction into the database:", err)
+		}
 	}
 }
 
