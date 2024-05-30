@@ -167,6 +167,7 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 		"Sell to Close":        true,
 		"Buy":                  true,
 		"Sell":                 true,
+		"Sell Short":           true,
 		"Assigned":             true,
 		"Expired":              true,
 		"Options Frwd Split":   true,
