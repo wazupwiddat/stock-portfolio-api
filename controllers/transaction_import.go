@@ -172,6 +172,7 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 		"Expired":              true,
 		"Options Frwd Split":   true,
 		"Stock Split":          true,
+		"Reverse Split":        true,
 		"Exchange or Exercise": true,
 	}
 

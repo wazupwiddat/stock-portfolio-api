@@ -139,3 +139,61 @@ func TestOptionsFrwdSplit(t *testing.T) {
 		})
 	})
 }
+
+func TestReverseSplit(t *testing.T) {
+	Convey("Given an existing stock position", t, func() {
+		db, err := setupDB()
+		So(err, ShouldBeNil)
+
+		account := models.Account{ID: 1, Name: "Test Account", UserID: 1}
+		db.Create(&account)
+
+		initialTransaction := models.Transaction{
+			Date:        time.Now().AddDate(0, -2, 0),
+			Action:      "Buy",
+			Symbol:      "ACB",
+			Description: "AURORA CANNABIS INC",
+			Quantity:    2000,
+			Price:       10,
+			Amount:      20000,
+			AccountID:   account.ID,
+		}
+		db.Create(&initialTransaction)
+
+		reverseSplitTransaction := models.Transaction{
+			Date:        time.Now().AddDate(0, -1, 0),
+			Action:      "Reverse Split",
+			Symbol:      "05156X884",
+			Description: "AURORA CANNABIS INC XXXREVERSE SPLIT EFF: 02/20/24",
+			Quantity:    -2000,
+			AccountID:   account.ID,
+		}
+		db.Create(&reverseSplitTransaction)
+
+		finalSplitTransaction := models.Transaction{
+			Date:        time.Now(),
+			Action:      "Reverse Split",
+			Symbol:      "ACBNEW",
+			Description: "AURORA NEW HOLDINGS INC",
+			Quantity:    200,
+			AccountID:   account.ID,
+		}
+		db.Create(&finalSplitTransaction)
+
+		Convey("When a reverse split transaction is processed", func() {
+			var oldPosition models.Position
+			db.Where("symbol = ?", "ACB").First(&oldPosition)
+
+			So(oldPosition.Quantity, ShouldEqual, 0)
+			So(oldPosition.Symbol, ShouldEqual, "ACB")
+			So(oldPosition.Opened, ShouldBeFalse)
+
+			var updatedPosition models.Position
+			db.Where("symbol = ?", "ACBNEW").First(&updatedPosition)
+
+			So(updatedPosition.Quantity, ShouldEqual, 200)
+			So(updatedPosition.Symbol, ShouldEqual, "ACBNEW")
+			So(updatedPosition.Opened, ShouldBeTrue)
+		})
+	})
+}

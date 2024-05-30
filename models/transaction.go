@@ -53,6 +53,22 @@ func (t *Transaction) BeforeCreate(tx *gorm.DB) error {
 		t.Price = 0
 	}
 
+	// Handle Reverse Split specifically
+	if t.Action == "Reverse Split" && strings.Contains(t.Description, "XXXREVERSE SPLIT EFF:") {
+		// Extract the company name from the description
+		companyName := strings.Split(t.Description, " XXXREVERSE SPLIT EFF:")[0]
+
+		var transactions []Transaction
+		if err := tx.Model(&Transaction{}).Where("description = ? AND account_id = ?", companyName, t.AccountID).Find(&transactions).Error; err != nil {
+			return err
+		}
+
+		// Find the first matching transaction and update the symbol of the reverse split transaction
+		if len(transactions) > 0 {
+			t.Symbol = transactions[0].Symbol
+		}
+	}
+
 	var position Position
 
 	// Check if there's an existing open position with the same symbol and account
