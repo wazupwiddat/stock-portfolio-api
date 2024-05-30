@@ -3,10 +3,14 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"stock-portfolio-api/models"
+
+	"github.com/gorilla/mux"
 )
 
+// CreateAccountRequest is used to create a new account
 type CreateAccountRequest struct {
 	Name string `json:"name" binding:"required"`
 }
@@ -51,4 +55,51 @@ func (c *Controller) HandleGetAccounts(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(accounts)
+}
+
+// HandleDeleteAccount handles deleting an account and its related transactions and positions
+func (c *Controller) HandleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	accountID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid account ID", http.StatusBadRequest)
+		return
+	}
+
+	u, err := userFromRequestContext(r, c.db)
+	if err != nil {
+		http.Error(w, "Unable to find user", http.StatusUnauthorized)
+		return
+	}
+
+	account, err := models.FindAccountByID(c.db, uint(accountID))
+	if err != nil {
+		http.Error(w, "Account not found", http.StatusNotFound)
+		return
+	}
+
+	if account.UserID != u.ID {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Delete all transactions for the account
+	if err := c.db.Where("account_id = ?", account.ID).Delete(&models.Transaction{}).Error; err != nil {
+		http.Error(w, "Failed to delete transactions", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete all positions for the account
+	if err := c.db.Where("account_id = ?", account.ID).Delete(&models.Position{}).Error; err != nil {
+		http.Error(w, "Failed to delete positions", http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the account
+	if err := c.db.Delete(account).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
