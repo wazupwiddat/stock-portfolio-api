@@ -40,6 +40,36 @@ func (c *Controller) HandleCreateAccount(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleGetAccounts handles fetching accounts for a specific user
+func (c *Controller) HandleGetAccount(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	accountID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid account ID", http.StatusBadRequest)
+		return
+	}
+
+	u, err := userFromRequestContext(r, c.db)
+	if err != nil {
+		http.Error(w, "Unable to find user", http.StatusUnauthorized)
+		return
+	}
+
+	account, err := models.FindAccountByID(c.db, uint(accountID))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if account.UserID != u.ID {
+		http.Error(w, "Unable to find user", http.StatusUnauthorized)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(account)
+}
+
+// HandleGetAccounts handles fetching accounts for a specific user
 func (c *Controller) HandleGetAccounts(w http.ResponseWriter, r *http.Request) {
 	u, err := userFromRequestContext(r, c.db)
 	if err != nil {

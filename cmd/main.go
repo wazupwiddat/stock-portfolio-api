@@ -66,6 +66,7 @@ func main() {
 	protected := router.PathPrefix("/protected").Subrouter()
 	protected.HandleFunc("/accounts", controller.HandleCreateAccount).Methods("POST")
 	protected.HandleFunc("/accounts", controller.HandleGetAccounts).Methods("GET")
+	protected.HandleFunc("/accounts/{id}", controller.HandleGetAccount).Methods("GET")
 	protected.HandleFunc("/accounts/{id}", controller.HandleDeleteAccount).Methods("DELETE") // Added delete account endpoint
 	protected.HandleFunc("/transactions", controller.HandleCreateTransaction).Methods("POST")
 	protected.HandleFunc("/transactions", controller.HandleGetTransactions).Methods("GET")
