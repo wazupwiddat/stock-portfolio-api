@@ -195,7 +195,7 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 		transactionDate = time.Date(transactionDate.Year(), transactionDate.Month(), transactionDate.Day(), 0, 0, 0, 0, location)
 
 		// Skip transactions that are older than or equal to the last transaction date
-		if transactionDate.Before(lastTransactionDate) || transactionDate.Equal(lastTransactionDate) {
+		if transactionDate.Before(lastTransactionDate) {
 			continue
 		}
 
@@ -203,6 +203,14 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 		price, _ := parseMonetaryValue(bt.Price)
 		fees, _ := parseMonetaryValue(bt.FeesComm)
 		amount, _ := parseMonetaryValue(bt.Amount)
+
+		// Check for existing transaction on the same date
+		var existingTransaction models.Transaction
+		err = db.Where("account_id = ? AND date = ? AND action = ? AND symbol = ? AND description = ? AND quantity = ? AND price = ? AND fees = ? AND amount = ?", accountID, transactionDate, bt.Action, bt.Symbol, bt.Description, quantity, price, fees, amount).First(&existingTransaction).Error
+		if err == nil {
+			// Transaction already exists, skip it
+			continue
+		}
 
 		// Create a new transaction
 		transaction := models.Transaction{

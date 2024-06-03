@@ -182,14 +182,60 @@ func (t *Transaction) AfterSave(tx *gorm.DB) error {
 	return tx.Save(&position).Error
 }
 
-// FindTransactionByID fetches a transaction by ID and includes the associated account information
-func FindTransactionByID(db *gorm.DB, id uint) (*Transaction, error) {
-	var transaction Transaction
-	result := db.Preload("Account").First(&transaction, id)
-	if result.Error != nil {
-		return nil, result.Error
+// AfterDelete hook to update the position after a transaction is deleted
+func (t *Transaction) AfterDelete(tx *gorm.DB) error {
+	var position Position
+
+	// Load the existing position
+	if err := tx.First(&position, t.PositionID).Error; err != nil {
+		return err
 	}
-	return &transaction, nil
+
+	// Check if the position has any other transactions
+	var count int64
+	tx.Model(&Transaction{}).Where("position_id = ?", t.PositionID).Count(&count)
+	if count == 0 {
+		// No more transactions for this position, delete the position
+		if err := tx.Delete(&Position{}, t.PositionID).Error; err != nil {
+			return err
+		}
+	} else {
+		// Recalculate position attributes
+		netQuantity, err := position.CalculateNetQuantity(tx)
+		if err != nil {
+			return err
+		}
+
+		totalCost, err := position.CalculateTotalCost(tx)
+		if err != nil {
+			return err
+		}
+
+		opened := netQuantity != 0
+		costBasis := 0.0
+		gainLoss := 0.0
+
+		if netQuantity != 0 {
+			costBasis = totalCost / netQuantity
+		} else {
+			// Calculate GainLoss when the position is closed
+			result := tx.Model(&Transaction{}).Where("position_id = ?", position.ID).Select("SUM(amount)").Scan(&gainLoss)
+			if result.Error != nil {
+				return result.Error
+			}
+		}
+
+		position.Quantity = netQuantity
+		position.CostBasis = costBasis
+		position.Opened = opened
+		position.GainLoss = gainLoss
+
+		if err := tx.Save(&position).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // DeleteTransaction deletes a transaction by ID and removes the associated position if no other transactions exist
@@ -200,33 +246,24 @@ func DeleteTransaction(db *gorm.DB, id uint) error {
 	}
 
 	// Delete the transaction
-	if err := db.Delete(&Transaction{}, id).Error; err != nil {
+	if err := db.Delete(&transaction).Error; err != nil {
 		return err
-	}
-
-	// Check if the position has any other transactions
-	var count int64
-	db.Model(&Transaction{}).Where("position_id = ?", transaction.PositionID).Count(&count)
-	if count == 0 {
-		// No more transactions for this position, delete the position
-		if err := db.Delete(&Position{}, transaction.PositionID).Error; err != nil {
-			return err
-		}
 	}
 
 	return nil
 }
 
-// CalculateTotalCost calculates the total cost of transactions associated with the position
-func (p *Position) CalculateTotalCost(db *gorm.DB) (float64, error) {
-	var totalCost float64
-	result := db.Model(&Transaction{}).Where("position_id = ?", p.ID).Select("SUM(price * quantity)").Scan(&totalCost)
+// FindTransactionByID fetches a transaction by ID and includes the associated account information
+func FindTransactionByID(db *gorm.DB, id uint) (*Transaction, error) {
+	var transaction Transaction
+	result := db.Preload("Account").First(&transaction, id)
 	if result.Error != nil {
-		return 0, result.Error
+		return nil, result.Error
 	}
-	return totalCost, nil
+	return &transaction, nil
 }
 
+// Create creates a new transaction in the database
 func Create(db *gorm.DB, t *Transaction) (uint, error) {
 	err := db.Create(t).Error
 	if err != nil {
@@ -235,10 +272,12 @@ func Create(db *gorm.DB, t *Transaction) (uint, error) {
 	return t.ID, nil
 }
 
+// CreateMany creates multiple transactions in the database
 func CreateMany(db *gorm.DB, trans []Transaction) error {
 	return db.Create(trans).Error
 }
 
+// FindAllByAccount fetches all transactions for a given account
 func FindAllByAccount(db *gorm.DB, a *Account) ([]Transaction, error) {
 	var transactions []Transaction
 	res := db.Where("account_id = ?", a.ID).Order("date DESC").Find(&transactions)
@@ -248,6 +287,7 @@ func FindAllByAccount(db *gorm.DB, a *Account) ([]Transaction, error) {
 	return transactions, nil
 }
 
+// FetchTransactionsByAccountIDAndSymbol fetches transactions by account ID and symbol with pagination
 func FetchTransactionsByAccountIDAndSymbol(db *gorm.DB, accountID uint, symbol string, page, limit int) ([]Transaction, error) {
 	var transactions []Transaction
 

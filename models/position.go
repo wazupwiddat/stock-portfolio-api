@@ -71,3 +71,13 @@ func (p *Position) IsOpen(db *gorm.DB) (bool, error) {
 	}
 	return false, nil
 }
+
+// CalculateTotalCost calculates the total cost of transactions associated with the position
+func (p *Position) CalculateTotalCost(db *gorm.DB) (float64, error) {
+	var totalCost float64
+	result := db.Model(&Transaction{}).Where("position_id = ?", p.ID).Select("SUM(price * quantity)").Scan(&totalCost)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return totalCost, nil
+}

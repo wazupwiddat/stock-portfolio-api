@@ -74,6 +74,7 @@ func main() {
 	protected.HandleFunc("/transactions/import", controller.HandleImport).Methods("POST") // Add this line for the import endpoint
 	protected.HandleFunc("/positions", controller.HandleGetPositions).Methods("GET")
 	protected.HandleFunc("/quote", controller.HandleGetCurrentPrice).Methods("GET")
+	protected.HandleFunc("/quotes", controller.HandleHistoricalPrices).Methods("GET")
 
 	protected.Use(controller.VerifyJWT)
 
