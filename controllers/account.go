@@ -113,16 +113,34 @@ func (c *Controller) HandleDeleteAccount(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Delete all transactions for the account
-	if err := c.db.Where("account_id = ?", account.ID).Delete(&models.Transaction{}).Error; err != nil {
-		http.Error(w, "Failed to delete transactions", http.StatusInternalServerError)
+	// Check if there are any transactions for the account
+	var transactionCount int64
+	if err := c.db.Model(&models.Transaction{}).Where("account_id = ?", account.ID).Count(&transactionCount).Error; err != nil {
+		http.Error(w, "Failed to count transactions", http.StatusInternalServerError)
 		return
 	}
 
-	// Delete all positions for the account
-	if err := c.db.Where("account_id = ?", account.ID).Delete(&models.Position{}).Error; err != nil {
-		http.Error(w, "Failed to delete positions", http.StatusInternalServerError)
+	// Delete transactions if they exist
+	if transactionCount > 0 {
+		if err := c.db.Where("account_id = ?", account.ID).Delete(&models.Transaction{}).Error; err != nil {
+			http.Error(w, "Failed to delete transactions", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Check if there are any positions for the account
+	var positionCount int64
+	if err := c.db.Model(&models.Position{}).Where("account_id = ?", account.ID).Count(&positionCount).Error; err != nil {
+		http.Error(w, "Failed to count positions", http.StatusInternalServerError)
 		return
+	}
+
+	// Delete positions if they exist
+	if positionCount > 0 {
+		if err := c.db.Where("account_id = ?", account.ID).Delete(&models.Position{}).Error; err != nil {
+			http.Error(w, "Failed to delete positions", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Delete the account
