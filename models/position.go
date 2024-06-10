@@ -43,17 +43,23 @@ func FetchPositionsByAccount(db *gorm.DB, accountID uint) ([]Position, error) {
 // CalculateNetQuantity calculates the net quantity of transactions associated with the position
 func (p *Position) CalculateNetQuantity(db *gorm.DB) (float64, error) {
 	var totalQuantity float64
-	result := db.Model(&Transaction{}).Where("position_id = ?", p.ID).Select("SUM(quantity)").Scan(&totalQuantity)
+	result := db.Model(&Transaction{}).
+		Where("position_id = ? AND deleted_at IS NULL", p.ID).
+		Select("SUM(quantity)").
+		Scan(&totalQuantity)
 	if result.Error != nil {
 		return 0, result.Error
 	}
 	return totalQuantity, nil
 }
 
-// CalculateNetAmount calculates the net quantity of transactions associated with the position
+// CalculateNetAmount calculates the net amount of transactions associated with the position
 func (p *Position) CalculateNetAmount(db *gorm.DB) (float64, error) {
 	var totalAmount float64
-	result := db.Model(&Transaction{}).Where("position_id = ?", p.ID).Select("SUM(amount)").Scan(&totalAmount)
+	result := db.Model(&Transaction{}).
+		Where("position_id = ? AND deleted_at IS NULL", p.ID).
+		Select("SUM(amount)").
+		Scan(&totalAmount)
 	if result.Error != nil {
 		return 0, result.Error
 	}
@@ -75,7 +81,10 @@ func (p *Position) IsOpen(db *gorm.DB) (bool, error) {
 // CalculateTotalCost calculates the total cost of transactions associated with the position
 func (p *Position) CalculateTotalCost(db *gorm.DB) (float64, error) {
 	var totalCost float64
-	result := db.Model(&Transaction{}).Where("position_id = ?", p.ID).Select("SUM(price * quantity)").Scan(&totalCost)
+	result := db.Model(&Transaction{}).
+		Where("position_id = ? AND deleted_at IS NULL", p.ID).
+		Select("SUM(price * quantity)").
+		Scan(&totalCost)
 	if result.Error != nil {
 		return 0, result.Error
 	}
