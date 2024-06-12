@@ -239,8 +239,38 @@ func importFile(filePath string, db *gorm.DB, accountID uint, lastTransactionDat
 
 	// Insert transactions into the database
 	for _, transaction := range transactions {
+		// Adjust transaction values
+		models.AdjustTransactionValues(&transaction)
+
+		// Handle specific actions
+		models.HandleStockSplit(&transaction)
+		err := models.HandleReverseSplit(db, &transaction)
+		if err != nil {
+			log.Println("Handling reverse split:", err)
+			continue
+		}
+
+		err = models.EnsurePositionExists(db, &transaction)
+		if err != nil {
+			log.Println("Error position exists:", err)
+			continue
+		}
+
+		err = models.ValidateAndAdjustTransaction(db, &transaction)
+		if err != nil {
+			log.Println("Error validate and adjust transaction:", err)
+			continue
+		}
+
 		if _, err := models.Create(db, &transaction); err != nil {
 			log.Println("Error inserting transaction into the database:", err)
+			continue
+		}
+
+		err = models.UpdatePosition(db, &transaction)
+		if err != nil {
+			log.Println("Error updating position: ", err)
+			continue
 		}
 	}
 }
