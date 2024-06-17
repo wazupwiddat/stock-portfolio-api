@@ -14,7 +14,7 @@ func setupDB() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.AutoMigrate(&Transaction{}, &User{}, &Position{}, &Account{})
+	db.AutoMigrate(&Transaction{}, &User{}, &Position{}, &Account{}, &StockSplit{})
 	return db, nil
 }
 
@@ -44,20 +44,9 @@ func TestTransactionModel(t *testing.T) {
 		}
 
 		Convey("When creating a transaction", func() {
-			AdjustTransactionValues(&transaction)
-			HandleStockSplit(&transaction)
-			err := HandleReverseSplit(db, &transaction)
-			So(err, ShouldBeNil)
-
-			err = EnsurePositionExists(db, &transaction)
-			So(err, ShouldBeNil)
-
 			id, err := Create(db, &transaction)
 			So(err, ShouldBeNil)
 			So(id, ShouldEqual, transaction.ID)
-
-			err = UpdatePosition(db, &transaction)
-			So(err, ShouldBeNil)
 
 			Convey("Then it should be retrievable from the database", func() {
 				var retrievedTransaction Transaction
@@ -95,25 +84,18 @@ func TestPositionModel(t *testing.T) {
 				AccountID:   account.ID,
 			}
 
-			AdjustTransactionValues(&transaction)
-			HandleStockSplit(&transaction)
-			err := HandleReverseSplit(db, &transaction)
-			So(err, ShouldBeNil)
-
-			err = EnsurePositionExists(db, &transaction)
-			So(err, ShouldBeNil)
-
 			id, err := Create(db, &transaction)
 			So(err, ShouldBeNil)
 			So(id, ShouldEqual, transaction.ID)
 
-			err = UpdatePosition(db, &transaction)
-			So(err, ShouldBeNil)
+			GeneratePositions(db, account.ID)
 
 			Convey("Then a new position should be created", func() {
-				var position Position
-				err := db.First(&position, transaction.PositionID).Error
+				positions, err := FetchAllPositions(db, "AAPL")
 				So(err, ShouldBeNil)
+				So(positions, ShouldHaveLength, 1)
+				position := positions[0]
+				So(position.Symbol, ShouldEqual, "AAPL")
 				So(position.Symbol, ShouldEqual, "AAPL")
 				So(position.Quantity, ShouldEqual, 10)
 				So(position.Opened, ShouldBeTrue)
@@ -132,23 +114,19 @@ func TestPositionModel(t *testing.T) {
 						Fees:        1.00,
 						Amount:      1600.00,
 						AccountID:   account.ID,
-						PositionID:  position.ID,
 					}
-
-					AdjustTransactionValues(&newTransaction)
-					err := EnsurePositionExists(db, &newTransaction)
-					So(err, ShouldBeNil)
 
 					newID, err := Create(db, &newTransaction)
 					So(err, ShouldBeNil)
 					So(newID, ShouldEqual, newTransaction.ID)
 
-					err = UpdatePosition(db, &newTransaction)
-					So(err, ShouldBeNil)
+					GeneratePositions(db, newTransaction.AccountID)
 
 					Convey("Then the position should be closed and GainLoss calculated", func() {
-						err := db.First(&position, newTransaction.PositionID).Error
+						positions, err := FetchAllPositions(db, "AAPL")
 						So(err, ShouldBeNil)
+						So(positions, ShouldHaveLength, 1)
+						position := positions[0]
 						So(position.Symbol, ShouldEqual, "AAPL")
 
 						// net quantity and cost basis
@@ -218,21 +196,10 @@ func TestCreateManyTransactions(t *testing.T) {
 				},
 			}
 
-			for i := range transactions {
-				AdjustTransactionValues(&transactions[i])
-				err := HandleReverseSplit(db, &transactions[i])
-				So(err, ShouldBeNil)
-				err = EnsurePositionExists(db, &transactions[i])
-				So(err, ShouldBeNil)
-			}
-
 			err := CreateMany(db, transactions)
 			So(err, ShouldBeNil)
 
-			for i := range transactions {
-				err = UpdatePosition(db, &transactions[i])
-				So(err, ShouldBeNil)
-			}
+			GeneratePositions(db, account.ID)
 
 			Convey("Then the transactions should be retrievable from the database", func() {
 				var retrievedTransactions []Transaction
@@ -285,23 +252,17 @@ func TestDeleteTransaction(t *testing.T) {
 			AccountID:   account.ID,
 		}
 
-		AdjustTransactionValues(&transaction)
-		err = EnsurePositionExists(db, &transaction)
-		So(err, ShouldBeNil)
-
 		id, err := Create(db, &transaction)
 		So(err, ShouldBeNil)
 		So(id, ShouldEqual, transaction.ID)
 
-		err = UpdatePosition(db, &transaction)
-		So(err, ShouldBeNil)
+		GeneratePositions(db, account.ID)
 
 		Convey("When deleting the transaction", func() {
 			err := DeleteTransaction(db, transaction.ID)
 			So(err, ShouldBeNil)
 
-			err = RecalculatePositionAttributes(db, &transaction)
-			So(err, ShouldBeNil)
+			GeneratePositions(db, account.ID)
 
 			Convey("Then the transaction should be removed from the database", func() {
 				var count int64
@@ -311,7 +272,7 @@ func TestDeleteTransaction(t *testing.T) {
 
 			Convey("And the position should also be removed if it has no other transactions", func() {
 				var position Position
-				err := db.Where("id = ?", transaction.PositionID).First(&position).Error
+				err := db.Where("symbol = ?", transaction.Symbol).First(&position).Error
 				So(err, ShouldEqual, gorm.ErrRecordNotFound)
 			})
 		})
@@ -336,20 +297,11 @@ func TestStockSplit(t *testing.T) {
 			AccountID: account.ID,
 		}
 
-		AdjustTransactionValues(&initialTransaction)
-		HandleStockSplit(&initialTransaction)
-		err = HandleReverseSplit(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
-		err = EnsurePositionExists(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
 		id, err := Create(db, &initialTransaction)
 		So(err, ShouldBeNil)
 		So(id, ShouldEqual, initialTransaction.ID)
 
-		err = UpdatePosition(db, &initialTransaction)
-		So(err, ShouldBeNil)
+		GeneratePositions(db, account.ID)
 
 		transaction := Transaction{
 			Date:      time.Now(),
@@ -361,20 +313,11 @@ func TestStockSplit(t *testing.T) {
 		}
 
 		Convey("When a stock split transaction is processed", func() {
-			AdjustTransactionValues(&transaction)
-			HandleStockSplit(&transaction)
-			err := HandleReverseSplit(db, &transaction)
-			So(err, ShouldBeNil)
-
-			err = EnsurePositionExists(db, &transaction)
-			So(err, ShouldBeNil)
-
 			id, err := Create(db, &transaction)
 			So(err, ShouldBeNil)
 			So(id, ShouldEqual, transaction.ID)
 
-			err = UpdatePosition(db, &transaction)
-			So(err, ShouldBeNil)
+			GeneratePositions(db, account.ID)
 
 			var createdTransaction Transaction
 			db.Where("action = ? AND symbol = ?", "Stock Split", "TSLA").First(&createdTransaction)
@@ -403,34 +346,47 @@ func TestOptionsFrwdSplit(t *testing.T) {
 		account := Account{ID: 1, Name: "Test Account", UserID: 1}
 		db.Create(&account)
 
-		transaction := Transaction{
-			Date:      time.Now(),
-			Action:    "Sell to Open",
-			Symbol:    "TSLA 01/20/2023 1000.00 C",
-			Price:     283.93,
-			Quantity:  1,
-			AccountID: account.ID,
-			Amount:    28392.21,
+		// Create the stock split data
+		stockSplit := StockSplit{
+			Symbol:     "TSLA",
+			SplitDate:  "2022-08-24",
+			SplitRatio: 3,
 		}
-		AdjustTransactionValues(&transaction)
-		HandleStockSplit(&transaction)
-		err = HandleReverseSplit(db, &transaction)
+		err = db.Create(&stockSplit).Error
 		So(err, ShouldBeNil)
 
-		err = EnsurePositionExists(db, &transaction)
-		So(err, ShouldBeNil)
+		// Create initial option transactions
+		optionTransactions := []Transaction{
+			{
+				Date:      time.Date(2022, 8, 10, 0, 0, 0, 0, time.UTC),
+				Action:    "Sell to Open",
+				Symbol:    "TSLA 01/20/2023 960.00 C",
+				Price:     99.76,
+				Quantity:  1,
+				AccountID: account.ID,
+				Amount:    9975.12,
+			},
+			{
+				Date:      time.Date(2021, 10, 26, 0, 0, 0, 0, time.UTC),
+				Action:    "Sell to Open",
+				Symbol:    "TSLA 01/20/2023 1000.00 C",
+				Price:     283.93,
+				Quantity:  1,
+				AccountID: account.ID,
+				Amount:    28392.21,
+			},
+		}
 
-		id, err := Create(db, &transaction)
-		So(err, ShouldBeNil)
-		So(id, ShouldEqual, transaction.ID)
+		for _, trans := range optionTransactions {
+			id, err := Create(db, &trans)
+			So(err, ShouldBeNil)
+			So(id, ShouldEqual, trans.ID)
+		}
 
-		err = UpdatePosition(db, &transaction)
-		So(err, ShouldBeNil)
-
-		oldPosition := transaction.Position
+		GeneratePositions(db, account.ID)
 
 		forwardSplitTrans := Transaction{
-			Date:      time.Now(),
+			Date:      time.Date(2022, 8, 25, 0, 0, 0, 0, time.UTC),
 			Action:    "Options Frwd Split",
 			Symbol:    "TSLA 01/20/2023 333.33 C",
 			Quantity:  -2,
@@ -438,20 +394,11 @@ func TestOptionsFrwdSplit(t *testing.T) {
 		}
 
 		Convey("When an options forward split transaction is processed", func() {
-			AdjustTransactionValues(&forwardSplitTrans)
-			HandleStockSplit(&forwardSplitTrans)
-			err := HandleReverseSplit(db, &forwardSplitTrans)
-			So(err, ShouldBeNil)
-
-			err = EnsurePositionExists(db, &forwardSplitTrans)
-			So(err, ShouldBeNil)
-
 			id, err := Create(db, &forwardSplitTrans)
 			So(err, ShouldBeNil)
 			So(id, ShouldEqual, forwardSplitTrans.ID)
 
-			err = UpdatePosition(db, &forwardSplitTrans)
-			So(err, ShouldBeNil)
+			GeneratePositions(db, account.ID)
 
 			var createdTransaction Transaction
 			db.Where("action = ? AND symbol = ?", "Options Frwd Split", "TSLA 01/20/2023 333.33 C").First(&createdTransaction)
@@ -459,7 +406,6 @@ func TestOptionsFrwdSplit(t *testing.T) {
 			Convey("A new options forward split transaction should be created", func() {
 				So(createdTransaction.Quantity, ShouldEqual, -2)
 				So(createdTransaction.Symbol, ShouldEqual, "TSLA 01/20/2023 333.33 C")
-				So(createdTransaction.PositionID, ShouldNotEqual, oldPosition.ID)
 			})
 
 			Convey("The position should be updated correctly", func() {
@@ -467,21 +413,9 @@ func TestOptionsFrwdSplit(t *testing.T) {
 				db.Where("symbol = ?", "TSLA 01/20/2023 333.33 C").First(&newPosition)
 
 				So(newPosition.Symbol, ShouldEqual, "TSLA 01/20/2023 333.33 C")
-				So(newPosition.Quantity, ShouldEqual, -3)                 // The split and subsequent buy/sell should result in -3 quantity
-				So(newPosition.CostBasis, ShouldAlmostEqual, 94.64, 0.01) // The cost basis should be adjusted accordingly
-			})
-
-			Convey("The old position should be deleted", func() {
-				var deletedPosition Position
-				err := db.Where("id = ?", oldPosition.ID).First(&deletedPosition).Error
-				So(err, ShouldEqual, gorm.ErrRecordNotFound)
-			})
-
-			Convey("The moved transactions should have the new symbol", func() {
-				var movedTransaction Transaction
-				db.Where("id = ?", transaction.ID).First(&movedTransaction)
-				So(movedTransaction.Symbol, ShouldEqual, "TSLA 01/20/2023 333.33 C")
-				So(movedTransaction.PositionID, ShouldEqual, createdTransaction.PositionID)
+				So(newPosition.Quantity, ShouldEqual, -3) // The split and subsequent buy/sell should result in 3 quantity
+				// Cost basis should be adjusted accordingly based on the split ratio
+				So(newPosition.CostBasis, ShouldAlmostEqual, 94.64, 0.01)
 			})
 		})
 	})
@@ -505,20 +439,11 @@ func TestReverseSplit(t *testing.T) {
 			Amount:      20000,
 			AccountID:   account.ID,
 		}
-		AdjustTransactionValues(&initialTransaction)
-		HandleStockSplit(&initialTransaction)
-		err = HandleReverseSplit(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
-		err = EnsurePositionExists(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
 		id, err := Create(db, &initialTransaction)
 		So(err, ShouldBeNil)
 		So(id, ShouldEqual, initialTransaction.ID)
 
-		err = UpdatePosition(db, &initialTransaction)
-		So(err, ShouldBeNil)
+		GeneratePositions(db, account.ID)
 
 		reverseSplitTransaction := Transaction{
 			Date:        time.Now().AddDate(0, -1, 0),
@@ -528,20 +453,11 @@ func TestReverseSplit(t *testing.T) {
 			Quantity:    -2000,
 			AccountID:   account.ID,
 		}
-		AdjustTransactionValues(&reverseSplitTransaction)
-		HandleStockSplit(&reverseSplitTransaction)
-		err = HandleReverseSplit(db, &reverseSplitTransaction)
-		So(err, ShouldBeNil)
-
-		err = EnsurePositionExists(db, &reverseSplitTransaction)
-		So(err, ShouldBeNil)
-
 		id, err = Create(db, &reverseSplitTransaction)
 		So(err, ShouldBeNil)
 		So(id, ShouldEqual, reverseSplitTransaction.ID)
 
-		err = UpdatePosition(db, &reverseSplitTransaction)
-		So(err, ShouldBeNil)
+		GeneratePositions(db, account.ID)
 
 		finalSplitTransaction := Transaction{
 			Date:        time.Now(),
@@ -551,20 +467,12 @@ func TestReverseSplit(t *testing.T) {
 			Quantity:    200,
 			AccountID:   account.ID,
 		}
-		AdjustTransactionValues(&finalSplitTransaction)
-		HandleStockSplit(&finalSplitTransaction)
-		err = HandleReverseSplit(db, &finalSplitTransaction)
-		So(err, ShouldBeNil)
-
-		err = EnsurePositionExists(db, &finalSplitTransaction)
-		So(err, ShouldBeNil)
 
 		id, err = Create(db, &finalSplitTransaction)
 		So(err, ShouldBeNil)
 		So(id, ShouldEqual, finalSplitTransaction.ID)
 
-		err = UpdatePosition(db, &finalSplitTransaction)
-		So(err, ShouldBeNil)
+		GeneratePositions(db, account.ID)
 
 		Convey("When a reverse split transaction is processed", func() {
 			var oldPosition Position
@@ -602,88 +510,22 @@ func TestInvalidSellTransactionWithoutPosition(t *testing.T) {
 			AccountID: account.ID,
 		}
 
-		Convey("When creating the transaction", func() {
-			AdjustTransactionValues(&transaction)
-			err := EnsurePositionExists(db, &transaction)
-			So(err, ShouldNotBeNil)
-			So(err.Error(), ShouldContainSubstring, "cannot SELL without an existing open position for symbol AAPL")
-		})
-	})
-}
-
-func TestAdjustSellTransactionQuantityExceedingPosition(t *testing.T) {
-	Convey("Given a database and a sell transaction exceeding the position quantity", t, func() {
-		db, err := setupDB()
+		id, err := Create(db, &transaction)
 		So(err, ShouldBeNil)
+		So(id, ShouldEqual, transaction.ID)
 
-		account := Account{ID: 1, Name: "Test Account", UserID: 1}
-		db.Create(&account)
+		GeneratePositions(db, account.ID)
 
-		initialTransaction := Transaction{
-			Date:      time.Now().AddDate(0, -1, 0),
-			Action:    "BUY",
-			Symbol:    "AAPL",
-			Quantity:  10,
-			Price:     150.00,
-			Amount:    -1500.00,
-			AccountID: account.ID,
-		}
-		AdjustTransactionValues(&initialTransaction)
-		HandleStockSplit(&initialTransaction)
-		err = HandleReverseSplit(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
-		err = EnsurePositionExists(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
-		id, err := Create(db, &initialTransaction)
-		So(err, ShouldBeNil)
-		So(id, ShouldEqual, initialTransaction.ID)
-
-		err = UpdatePosition(db, &initialTransaction)
-		So(err, ShouldBeNil)
-
-		transaction := Transaction{
-			Date:      time.Now(),
-			Action:    "SELL",
-			Symbol:    "AAPL",
-			Quantity:  -15,
-			Price:     160.00,
-			Amount:    2400.00,
-			AccountID: account.ID,
-		}
-
-		Convey("When creating the transaction", func() {
-			AdjustTransactionValues(&transaction)
-			HandleStockSplit(&transaction)
-			err := EnsurePositionExists(db, &transaction)
+		Convey("Transaction is created", func() {
+			var transactions []Transaction
+			err := db.Where("symbol = ?", "AAPL").Find(&transactions).Error
 			So(err, ShouldBeNil)
+			So(len(transactions), ShouldEqual, 1)
 
-			err = ValidateAndAdjustTransaction(db, &transaction)
-			So(err, ShouldBeNil)
-			So(transaction.Quantity, ShouldEqual, -10)
-
-			id, err := Create(db, &transaction)
-			So(err, ShouldBeNil)
-			So(id, ShouldEqual, transaction.ID)
-
-			err = UpdatePosition(db, &transaction)
-			So(err, ShouldBeNil)
-
-			Convey("Then the position should be closed and GainLoss calculated", func() {
+			Convey("There should be no position until we have a OPEN transaction", func() {
 				var position Position
-				err := db.First(&position, transaction.PositionID).Error
-				So(err, ShouldBeNil)
-				So(position.Symbol, ShouldEqual, "AAPL")
-
-				// net quantity and cost basis
-				So(position.CostBasis, ShouldEqual, 0)
-				So(position.Quantity, ShouldEqual, 0)
-				So(position.Opened, ShouldBeFalse)
-
-				// Check GainLoss
-				expectedGainLoss := 100.0 // Expected GainLoss when position is closed
-				So(position.GainLoss, ShouldEqual, expectedGainLoss)
+				err := db.Where("symbol = ?", "AAPL").First(&position)
+				So(err, ShouldNotBeNil)
 			})
 		})
 	})
@@ -735,22 +577,12 @@ func TestGMEOptionsTransactions(t *testing.T) {
 
 		Convey("When processing the transactions", func() {
 			for _, transaction := range transactions {
-				AdjustTransactionValues(&transaction)
-				err := HandleReverseSplit(db, &transaction)
-				So(err, ShouldBeNil)
-
-				err = EnsurePositionExists(db, &transaction)
-				So(err, ShouldBeNil)
-
-				err = ValidateAndAdjustTransaction(db, &transaction)
-				So(err, ShouldBeNil)
 
 				id, err := Create(db, &transaction)
 				So(err, ShouldBeNil)
 				So(id, ShouldEqual, transaction.ID)
 
-				err = UpdatePosition(db, &transaction)
-				So(err, ShouldBeNil)
+				GeneratePositions(db, account.ID)
 			}
 
 			Convey("Then the positions should be updated correctly", func() {

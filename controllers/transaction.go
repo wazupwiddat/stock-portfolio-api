@@ -98,35 +98,13 @@ func (c *Controller) HandleCreateTransaction(w http.ResponseWriter, r *http.Requ
 		AccountID:   acct.ID,
 	}
 
-	// Adjust transaction values
-	models.AdjustTransactionValues(transaction)
-
-	// Handle specific actions
-	models.HandleStockSplit(transaction)
-	if err := models.HandleReverseSplit(c.db, transaction); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Ensure the position exists
-	if err := models.EnsurePositionExists(c.db, transaction); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Validate and adjust the transaction
-	if err := models.ValidateAndAdjustTransaction(c.db, transaction); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	if _, err := models.Create(c.db, transaction); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Update position after saving the transaction
-	if err := models.UpdatePosition(c.db, transaction); err != nil {
+	// Recalculate position attributes after deleting the transaction
+	if err := models.GeneratePositions(c.db, transaction.AccountID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -204,7 +182,7 @@ func (c *Controller) HandleDeleteTransaction(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Recalculate position attributes after deleting the transaction
-	if err := models.RecalculatePositionAttributes(c.db, transaction); err != nil {
+	if err := models.GeneratePositions(c.db, transaction.AccountID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

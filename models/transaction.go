@@ -3,6 +3,9 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +25,8 @@ type Transaction struct {
 	Amount      float64
 	AccountID   uint    `gorm:"index"`
 	Account     Account `gorm:"foreignKey:AccountID"`
-	PositionID  uint
-	Position    Position `gorm:"foreignKey:PositionID"`
+	// Remove PositionID and Position fields
+	Processed bool `gorm:"default:false"` // Add this field
 }
 
 // MarshalJSON customizes the JSON representation of the Transaction struct
@@ -129,219 +132,204 @@ func GetLastTransactionDate(db *gorm.DB, accountID uint) (time.Time, error) {
 	return lastTransaction.Date, nil
 }
 
+// GeneratePositions generates positions based on the current transactions in the database
+func GeneratePositions(db *gorm.DB, accountID uint) error {
+	var transactions []Transaction
+	if err := db.Where("account_id = ?", accountID).Order("date ASC").Find(&transactions).Error; err != nil {
+		return err
+	}
+
+	// Let's just rip through and handle Splits, Reverse Splits
+	for _, t := range transactions {
+		if t.Processed {
+			continue
+		}
+		AdjustTransactionValues(db, t)
+		if t.Action == "Stock Split" {
+			HandleStockSplit(db, t)
+		}
+		if t.Action == "Reverse Split" {
+			err := HandleReverseSplit(db, t)
+			if err != nil {
+				log.Println("Handle Reverse Split: ", err)
+				continue
+			}
+		}
+		if t.Action == "Options Frwd Split" {
+			err := HandleOptionsForwardSplit(db, t)
+			if err != nil {
+				log.Println("Handle Options Forward Split: ", err)
+				continue
+			}
+		}
+	}
+
+	// Reload transaction now that Splits are handled.
+	if err := db.Where("account_id = ?", accountID).Order("date ASC").Find(&transactions).Error; err != nil {
+		return err
+	}
+
+	// this is destructive but ok :)
+	if err := db.Unscoped().Where("account_id = ?", accountID).Delete(Position{}).Error; err != nil {
+		return err
+	}
+
+	positions := make(map[string]*Position)
+
+	for _, t := range transactions {
+		if _, exists := positions[t.Symbol]; !exists {
+			if !validOpenTransaction(t) {
+				continue
+			}
+			positions[t.Symbol] = &Position{
+				Symbol:           t.Symbol,
+				UnderlyingSymbol: strings.Split(t.Symbol, " ")[0],
+				AccountID:        accountID,
+				OpenDate:         t.Date,
+				Short:            t.Quantity < 0,
+			}
+		}
+
+		pos := positions[t.Symbol]
+		pos.Quantity += t.Quantity
+		pos.CostBasis += t.Price * t.Quantity
+		pos.Transactions = append(pos.Transactions, t)
+	}
+
+	for _, pos := range positions {
+		pos.Opened = pos.Quantity != 0
+		pos.CostBasis = 0.0
+		if pos.Opened {
+			pos.CostBasis = pos.CalculateTotalCost() / pos.Quantity
+		} else {
+			pos.GainLoss = pos.CalculateNetAmount()
+		}
+
+		// Save or update the position
+		if err := db.Save(pos).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func HandleOptionsForwardSplit(db *gorm.DB, t Transaction) error {
+	newSymbolParts := strings.Split(t.Symbol, " ")
+	if len(newSymbolParts) < 4 {
+		return fmt.Errorf("invalid option symbol format: %s", t.Symbol)
+	}
+
+	underlyingSymbol := newSymbolParts[0]
+	expirationDate := newSymbolParts[1]
+	newStrikePriceStr := newSymbolParts[2]
+	optionType := newSymbolParts[3]
+
+	// Convert new strike price to float64
+	newStrikePrice, err := strconv.ParseFloat(newStrikePriceStr, 64)
+	if err != nil {
+		return fmt.Errorf("invalid new strike price: %s", newStrikePriceStr)
+	}
+
+	// Find the stock split data
+	var stockSplit StockSplit
+	if err := db.Where("symbol = ? AND split_date <= ?", underlyingSymbol, t.Date).Order("split_date DESC").First(&stockSplit).Error; err != nil {
+		return fmt.Errorf("failed to find the stock split data: %v", err)
+	}
+
+	// Determine the split ratio based on the stock split data
+	ratio := stockSplit.SplitRatio
+
+	// Find old transactions that match the underlying symbol, expiration date, and option type
+	var oldTransactions []Transaction
+	query := fmt.Sprintf("%s %s %% %s", underlyingSymbol, expirationDate, optionType)
+	if err := db.Model(&Transaction{}).Where("symbol LIKE ? AND account_id = ? AND date < ?", query, t.AccountID, t.Date).Find(&oldTransactions).Error; err != nil {
+		return err
+	}
+
+	for _, transaction := range oldTransactions {
+		// Parse the old transaction symbol to get its parts
+		oldSymbolParts := strings.Split(transaction.Symbol, " ")
+		if len(oldSymbolParts) < 4 {
+			continue
+		}
+		oldStrikePriceStr := oldSymbolParts[2]
+		oldStrikePrice, err := strconv.ParseFloat(oldStrikePriceStr, 64)
+		if err != nil {
+			return fmt.Errorf("invalid new strike price: %s", newStrikePriceStr)
+		}
+		roundedOldStrikePrice := math.Round(newStrikePrice * ratio)
+		// Only update the symbol if the old strike price matches the expected one
+		if oldStrikePrice == roundedOldStrikePrice {
+			transaction.Symbol = t.Symbol
+
+			if err := db.Save(&transaction).Error; err != nil {
+				return err
+			}
+		}
+	}
+
+	t.Processed = true
+	if err := db.Save(&t).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
 // AdjustTransactionValues adjusts transaction values based on the action type
-func AdjustTransactionValues(t *Transaction) {
+func AdjustTransactionValues(db *gorm.DB, t Transaction) error {
 	if strings.Contains(strings.ToLower(t.Action), "buy") && t.Amount > 0 {
 		t.Amount = -t.Amount
 	}
 	if strings.Contains(strings.ToLower(t.Action), "sell") && t.Quantity > 0 {
 		t.Quantity = -t.Quantity
 	}
+	t.Processed = true
+	if err := db.Save(&t).Error; err != nil {
+		return err
+	}
+	return nil
 }
 
 // HandleStockSplit adjusts the price for stock split transactions
-func HandleStockSplit(t *Transaction) {
-	if t.Action == "Stock Split" {
-		t.Price = 0
+func HandleStockSplit(db *gorm.DB, t Transaction) error {
+	t.Price = 0
+	t.Processed = true
+	if err := db.Save(&t).Error; err != nil {
+		return err
 	}
+	return nil
 }
 
 // HandleReverseSplit handles reverse split transactions
-func HandleReverseSplit(tx *gorm.DB, t *Transaction) error {
-	if t.Action == "Reverse Split" && strings.Contains(t.Description, "XXXREVERSE SPLIT EFF:") {
+func HandleReverseSplit(db *gorm.DB, t Transaction) error {
+	if strings.Contains(t.Description, "XXXREVERSE SPLIT EFF:") {
 		companyName := strings.Split(t.Description, " XXXREVERSE SPLIT EFF:")[0]
 
 		var transactions []Transaction
-		if err := tx.Model(&Transaction{}).Where("description = ? AND account_id = ?", companyName, t.AccountID).Find(&transactions).Error; err != nil {
+		if err := db.Model(&Transaction{}).Where("description = ? AND account_id = ?", companyName, t.AccountID).Find(&transactions).Error; err != nil {
 			return err
 		}
 
 		if len(transactions) > 0 {
 			t.Symbol = transactions[0].Symbol
 		}
+		t.Processed = true
+		if err := db.Save(&t).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-// EnsurePositionExists ensures that a position exists for the given transaction
-func EnsurePositionExists(tx *gorm.DB, t *Transaction) error {
-	var position Position
-
-	// Check if there's an existing open position with the same symbol and account
-	if err := tx.Where("symbol = ? AND opened = ? AND account_id = ?", t.Symbol, true, t.AccountID).First(&position).Error; err == gorm.ErrRecordNotFound {
-		if strings.ToLower(t.Action) == "sell" || t.Action == "Buy to Close" || t.Action == "Sell to Close" {
-			return fmt.Errorf("cannot %s without an existing open position for symbol %s", t.Action, t.Symbol)
-		}
-		// If no open position exists and the action is not sell-related, create a new one
-		underlyingSymbol := t.Symbol
-		parts := strings.Split(t.Symbol, " ")
-		if len(parts) > 1 {
-			underlyingSymbol = parts[0]
-		}
-		position = Position{
-			Symbol:           t.Symbol,
-			UnderlyingSymbol: underlyingSymbol,
-			Quantity:         t.Quantity,
-			CostBasis:        t.Price * t.Quantity,
-			Opened:           t.Quantity != 0,
-			AccountID:        t.AccountID, // Ensure AccountID is set
-		}
-		if err := tx.Create(&position).Error; err != nil {
-			return err
-		}
-		t.PositionID = position.ID
-	} else if err != nil {
-		return err
-	} else {
-		t.PositionID = position.ID
-	}
-
-	return nil
-}
-
-// UpdatePosition updates the position based on the transaction
-func UpdatePosition(tx *gorm.DB, t *Transaction) error {
-	var position Position
-
-	if err := tx.First(&position, t.PositionID).Error; err != nil {
-		return err
-	}
-
-	if t.Action == "Options Frwd Split" {
-		newSymbolParts := strings.Split(t.Symbol, " ")
-		if len(newSymbolParts) < 4 {
-			return fmt.Errorf("invalid option symbol format: %s", t.Symbol)
-		}
-
-		underlyingSymbol := newSymbolParts[0]
-		expirationDate := newSymbolParts[1]
-		optionType := newSymbolParts[3]
-
-		var oldPosition Position
-		if err := tx.Where("symbol LIKE ? AND account_id = ? AND opened = ?", fmt.Sprintf("%s %s %% %s", underlyingSymbol, expirationDate, optionType), t.AccountID, true).First(&oldPosition).Error; err != nil {
-			return err
-		}
-
-		var transactions []Transaction
-		if err := tx.Model(&Transaction{}).Where("position_id = ?", oldPosition.ID).Find(&transactions).Error; err != nil {
-			return err
-		}
-		for _, transaction := range transactions {
-			transaction.PositionID = t.PositionID
-			transaction.Symbol = t.Symbol
-			if err := tx.Save(&transaction).Error; err != nil {
-				return err
-			}
-		}
-
-		if err := tx.Delete(&oldPosition).Error; err != nil {
-			return err
+func validOpenTransaction(t Transaction) bool {
+	// This transaction needs to be a valid Opening
+	// Buy, Sell Short, Sell to Open, Buy to Open
+	openActions := []string{"buy", "sell short", "sell to open", "buy to open", "reverse split"}
+	for _, a := range openActions {
+		if strings.ToLower(t.Action) == a {
+			return true
 		}
 	}
-
-	netQuantity, err := position.CalculateNetQuantity(tx)
-	if err != nil {
-		return err
-	}
-
-	totalCost, err := position.CalculateTotalCost(tx)
-	if err != nil {
-		return err
-	}
-
-	opened := netQuantity != 0
-	costBasis := 0.0
-	gainLoss := 0.0
-
-	if netQuantity != 0 {
-		costBasis = totalCost / netQuantity
-	} else {
-		result := tx.Model(&Transaction{}).Where("position_id = ?", position.ID).Select("SUM(amount)").Scan(&gainLoss)
-		if result.Error != nil {
-			return result.Error
-		}
-	}
-
-	position.Quantity = netQuantity
-	position.CostBasis = costBasis
-	position.Opened = opened
-	position.GainLoss = gainLoss
-
-	return tx.Save(&position).Error
-}
-
-// RecalculatePositionAttributes recalculates the attributes of a position after a transaction is deleted
-func RecalculatePositionAttributes(tx *gorm.DB, t *Transaction) error {
-	var position Position
-
-	if err := tx.First(&position, t.PositionID).Error; err != nil {
-		return err
-	}
-
-	var count int64
-	tx.Model(&Transaction{}).Where("position_id = ?", t.PositionID).Count(&count)
-	if count == 0 {
-		if err := tx.Delete(&Position{}, t.PositionID).Error; err != nil {
-			return err
-		}
-	} else {
-		netQuantity, err := position.CalculateNetQuantity(tx)
-		if err != nil {
-			return err
-		}
-
-		totalCost, err := position.CalculateTotalCost(tx)
-		if err != nil {
-			return err
-		}
-
-		opened := netQuantity != 0
-		costBasis := 0.0
-		gainLoss := 0.0
-
-		if netQuantity != 0 {
-			costBasis = totalCost / netQuantity
-		} else {
-			result := tx.Model(&Transaction{}).Where("position_id = ?", position.ID).Select("SUM(amount)").Scan(&gainLoss)
-			if result.Error != nil {
-				return result.Error
-			}
-		}
-
-		position.Quantity = netQuantity
-		position.CostBasis = costBasis
-		position.Opened = opened
-		position.GainLoss = gainLoss
-
-		if err := tx.Save(&position).Error; err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// ValidateAndAdjustTransaction validates and adjusts the transaction quantity if necessary
-func ValidateAndAdjustTransaction(tx *gorm.DB, t *Transaction) error {
-	var position Position
-	if err := tx.First(&position, t.PositionID).Error; err != nil {
-		return err
-	}
-
-	// Action = Sell
-	//  the transaction will have a quanity of some negative number like -15 and the position will have a positive Quantity like 10.
-	// Action = Buy to Close
-	//  the transaction will have a quanity of a positive number like 15 and the position will be -10
-	// Sell to Close will be similar to Sell
-
-	// Adjust the transaction quantity if it exceeds the position quantity
-	action := strings.ToLower(t.Action)
-	if (action == "sell" && t.Quantity < 0 && -t.Quantity > position.Quantity) ||
-		(action == "sell to close") && t.Quantity < 0 && -t.Quantity > position.Quantity ||
-		(action == "Buy to Close" && t.Quantity > 0 && t.Quantity > -position.Quantity) {
-		t.Amount = position.Quantity * t.Price
-		t.Quantity = -position.Quantity
-	}
-
-	return nil
+	return false
 }
