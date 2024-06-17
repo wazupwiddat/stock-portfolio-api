@@ -1,18 +1,24 @@
 package models
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Position struct {
 	gorm.Model
-	ID               uint    `gorm:"primaryKey"`
-	Symbol           string  `gorm:"not null"`
-	UnderlyingSymbol string  `gorm:"not null"`
-	Quantity         float64 `gorm:"not null"`
-	CostBasis        float64 `gorm:"not null"`
-	Opened           bool    `gorm:"not null"`
+	ID               uint      `gorm:"primaryKey"`
+	Symbol           string    `gorm:"not null"`
+	UnderlyingSymbol string    `gorm:"not null"`
+	OpenDate         time.Time `gorm:"type:date"`
+	Quantity         float64   `gorm:"not null"`
+	CostBasis        float64   `gorm:"not null"`
+	Opened           bool      `gorm:"not null"`
 	GainLoss         float64
+	Short            bool
 	AccountID        uint          `gorm:"index"`
-	Transactions     []Transaction `gorm:"foreignKey:PositionID"`
+	Transactions     []Transaction `gorm:"-"`
 }
 
 // FetchAllPositions fetches all positions for a given stock symbol
@@ -32,61 +38,42 @@ func FetchOpenPositions(db *gorm.DB, symbol string) ([]Position, error) {
 // FetchPositionsByAccount fetches all positions for a given account
 func FetchPositionsByAccount(db *gorm.DB, accountID uint) ([]Position, error) {
 	var positions []Position
-	err := db.Joins("JOIN transactions ON transactions.position_id = positions.id").
-		Where("transactions.account_id = ?", accountID).
-		Group("positions.id").
-		Preload("Transactions").
-		Find(&positions).Error
+	err := db.Where("account_id = ?", accountID).Find(&positions).Error
 	return positions, err
 }
 
 // CalculateNetQuantity calculates the net quantity of transactions associated with the position
-func (p *Position) CalculateNetQuantity(db *gorm.DB) (float64, error) {
+func (p *Position) CalculateNetQuantity() float64 {
 	var totalQuantity float64
-	result := db.Model(&Transaction{}).
-		Where("position_id = ? AND deleted_at IS NULL", p.ID).
-		Select("SUM(quantity)").
-		Scan(&totalQuantity)
-	if result.Error != nil {
-		return 0, result.Error
+	for _, t := range p.Transactions {
+		totalQuantity = totalQuantity + t.Quantity
 	}
-	return totalQuantity, nil
+	return totalQuantity
 }
 
 // CalculateNetAmount calculates the net amount of transactions associated with the position
-func (p *Position) CalculateNetAmount(db *gorm.DB) (float64, error) {
+func (p *Position) CalculateNetAmount() float64 {
 	var totalAmount float64
-	result := db.Model(&Transaction{}).
-		Where("position_id = ? AND deleted_at IS NULL", p.ID).
-		Select("SUM(amount)").
-		Scan(&totalAmount)
-	if result.Error != nil {
-		return 0, result.Error
+	for _, t := range p.Transactions {
+		totalAmount = totalAmount + t.Amount
 	}
-	return totalAmount, nil
+	return totalAmount
 }
 
 // IsOpen checks if the position is open based on the net quantity of transactions
-func (p *Position) IsOpen(db *gorm.DB) (bool, error) {
-	netQuantity, err := p.CalculateNetQuantity(db)
-	if err != nil {
-		return false, err
-	}
+func (p *Position) IsOpen() bool {
+	netQuantity := p.CalculateNetQuantity()
 	if (netQuantity > 0 && p.Quantity > 0) || (netQuantity < 0 && p.Quantity < 0) {
-		return true, nil
+		return true
 	}
-	return false, nil
+	return false
 }
 
 // CalculateTotalCost calculates the total cost of transactions associated with the position
-func (p *Position) CalculateTotalCost(db *gorm.DB) (float64, error) {
+func (p *Position) CalculateTotalCost() float64 {
 	var totalCost float64
-	result := db.Model(&Transaction{}).
-		Where("position_id = ? AND deleted_at IS NULL", p.ID).
-		Select("SUM(price * quantity)").
-		Scan(&totalCost)
-	if result.Error != nil {
-		return 0, result.Error
+	for _, t := range p.Transactions {
+		totalCost = totalCost + (t.Price * t.Quantity)
 	}
-	return totalCost, nil
+	return totalCost
 }

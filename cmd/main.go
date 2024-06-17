@@ -48,7 +48,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db.AutoMigrate(&models.Account{}, &models.User{}, &models.Transaction{}, &models.Position{})
+	db.AutoMigrate(&models.Account{}, &models.User{}, &models.Transaction{}, &models.Position{}, &models.StockSplit{})
+	models.InitializeStockSplits(db)
 
 	router := mux.NewRouter()
 	controller := controllers.InitController(db, cfg)
